@@ -30,6 +30,7 @@ from numpy import sqrt
 from numpy.linalg import norm
 from sklearn.decomposition import PCA
 from sklearn.manifold import Isomap
+import skdim
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
@@ -41,11 +42,13 @@ from sklearn.metrics.cluster import fowlkes_mallows_score
 from sklearn.metrics.cluster import calinski_harabasz_score
 from sklearn.metrics import silhouette_score
 from sklearn.metrics import davies_bouldin_score
+from sklearn.metrics.pairwise import pairwise_distances
 from umap import UMAP                 # install with: pip install umap
 import json
 import sys
 from skimage.util import random_noise
-
+from functions import HopfLink, RepliclustArchetype
+from scipy.sparse.csgraph import connected_components
 from sklearn.decomposition import KernelPCA
 from sklearn.manifold import LocallyLinearEmbedding
 from sklearn.manifold import SpectralEmbedding
@@ -67,6 +70,23 @@ def KIsomap(dados, k, d, option, alpha=0.5):
     # Generate KNN graph
     knnGraph = sknn.kneighbors_graph(dados, n_neighbors=k, mode='distance')
     A = knnGraph.toarray()
+
+    # Verificar o número de componentes conectados
+    n_connected_components, components_labels = connected_components(knnGraph)
+
+    # Caso o número de componentes conectados seja maior que 1
+    if n_connected_components > 1:
+
+        # Corrigir componentes conexas
+        nbg = FixComponents(
+            X=dados,
+            graph=knnGraph,
+            n_connected_components=n_connected_components,
+            component_labels=components_labels
+        )
+
+        A = nbg.toarray()
+
     # Computes the means and covariance matrices for each patch
     for i in range(n):       
         vizinhos = A[i, :]
@@ -88,6 +108,7 @@ def KIsomap(dados, k, d, option, alpha=0.5):
         
     # Defines the patch-based matrix (graph)
     B = A.copy()
+
     for i in range(n):
         for j in range(n):
             if B[i, j] > 0:
@@ -117,6 +138,20 @@ def KIsomap(dados, k, d, option, alpha=0.5):
                     B[i, j] = 1 - np.exp(-delta.mean())     # metric A9 - Negative exponential kernel
                 else:
                     B[i, j] = ((1-alpha)*A[i, j]/sum(A[i, :]) + alpha*norm(delta))      # alpha = 0 => regular ISOMAP, alpha = 1 => K-ISOMAP 
+
+        # Verificar o número de componentes conectados
+    n_connected_components, components_labels = connected_components(B)
+
+    # Caso o número de componentes conectados seja maior que 1
+    if n_connected_components > 1:
+
+        # Corrigir componentes conexas
+        B = FixComponents(
+            X=B,
+            graph=B,
+            n_connected_components=n_connected_components,
+            component_labels=components_labels
+        )
                 
     # Computes geodesic distances using the previous selected metric
     G = nx.from_numpy_array(B)
@@ -143,6 +178,29 @@ def KIsomap(dados, k, d, option, alpha=0.5):
     # Return the low dimensional coordinates
     return output.real
     
+
+def FixComponents(
+    X,
+    graph,
+    n_connected_components,
+    component_labels):
+
+    for i in range(n_connected_components):
+        idx_i = np.flatnonzero(component_labels == i)
+        Xi = X[idx_i]
+
+        for j in range(i):
+            idx_j = np.flatnonzero(component_labels == j)
+            Xj = X[idx_j]
+
+            D = pairwise_distances(Xi, Xj, metric="euclidean")
+
+            ii, jj = np.unravel_index(D.argmin(axis=None), D.shape)
+
+            graph[idx_i[ii], idx_j[jj]] = D[ii, jj]
+            graph[idx_j[jj], idx_i[ii]] = D[ii, jj]
+
+    return graph
 
 
 '''
@@ -216,15 +274,30 @@ def PlotaDados(dados, labels, metodo):
     plt.savefig(nome_arquivo, dpi=300)
     plt.close()
 
+def MakeSyntheticData():
+
+    X1, y1 = HopfLink(noise=True)
+    X2, y2 = RepliclustArchetype()
+
+    hopf_link = {'data': X1, 'target': y1, 'details': {'name':'Hopf-Link'}}
+    repliclust_archetype = {'data': X2, 'target': y2, 'details': {'name':'Repliclust-Archetype'}}
+    
+    return hopf_link, repliclust_archetype
+
 
 ##################### Beginning of thescript
 
 #####################  Data loading
 def main():
+
+    hopf_link, repliclust_archetype = MakeSyntheticData()
     
     #To perform the experiments according to the article, uncomment the desired sets of datasets
     datasets = [
-        
+        # Synthetic data
+         {"db": hopf_link, "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
+         {"db": repliclust_archetype, "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0}
+
         # First set of experiments
         # {"db": skdata.fetch_openml(name='servo', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='car-evaluation', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
@@ -366,8 +439,22 @@ def main():
         print('M = ', m)
         print('C = %d' %c)
         
+            ######## INTRINSIC DIMENSION ESTIMATION
+        # Estimate global intrinsic dimension with MLE - Levina & Bickel
+        MLE = skdim.id.MLE().fit(dataset_data)
+
+        # Get estimated intrinsic dimension
+        if int(np.floor(MLE.dimension_)) == 0 or int(np.floor(MLE.dimension_)) == 1:
+            d_star = 2
+        else: 
+            d_star = int(np.floor(MLE.dimension_)) 
+
+        print("Intrinsic Dimension: ", d_star)
+
         # Number of neighbors in KNN graph (patch size)
-        nn = round(sqrt(n))                 
+        nn = int(np.floor(np.sqrt(n)))
+
+        print("Number of neighbors: ", nn)
 
         
         ############## K-ISOMAP 
@@ -424,7 +511,7 @@ def main():
                 DR_method = 'K-ISOMAP ' + dataset_name + ' option=' + str(i) + ' cluster=' + CLUSTER + ' mag=' + str(r)
                 
                 try:
-                    dados_kiso = KIsomap(dataset_data, nn, 2, i)       
+                    dados_kiso = KIsomap(dataset_data, nn, d_star, i)       
                 except Exception as e:
                     print(DR_method + " -------- def KIsomap error:", e)
                     dados_kiso = []
@@ -474,7 +561,7 @@ def main():
             ############## Regular ISOMAP 
             print(dataset_name + ' ISOMAP result')
             print('---------------')
-            model = Isomap(n_neighbors=nn, n_components=2)
+            model = Isomap(n_neighbors=nn, n_components=d_star)
             isomap_data = model.fit_transform(dataset_data)
             isomap_data = isomap_data.T
             DR_method = 'ISOMAP ' + dataset_name + ' cluster=' + CLUSTER
@@ -490,7 +577,7 @@ def main():
             ############## UMAP
             print(dataset_name + ' UMAP result')
             print('---------------')
-            model = UMAP(n_components=2)
+            model = UMAP(n_components=d_star, n_neighbors=nn)
             umap_data = model.fit_transform(dataset_data)
             umap_data = umap_data.T
             DR_method = 'UMAP ' + dataset_name + ' cluster=' + CLUSTER
@@ -522,7 +609,7 @@ def main():
             ############## KernelPCA
             print(dataset_name + ' KernelPCA result')
             print('---------------')
-            model = KernelPCA(n_components=2)
+            model = KernelPCA(n_components=d_star,kernel='rbf')
             kpca_data = model.fit_transform(dataset_data)
             kpca_data = kpca_data.T
             DR_method = 'KernelPCA ' + dataset_name + ' cluster=' + CLUSTER
@@ -538,7 +625,7 @@ def main():
             ############## LLE LocallyLinearEmbedding
             print(dataset_name + ' LocallyLinearEmbedding result')
             print('---------------')
-            model = LocallyLinearEmbedding(n_components=2)
+            model = LocallyLinearEmbedding(n_components=d_star,n_neighbors=nn)
             lle_data = model.fit_transform(dataset_data)
             lle_data = lle_data.T
             DR_method = 'LocallyLinearEmbedding ' + dataset_name + ' cluster=' + CLUSTER
@@ -554,7 +641,7 @@ def main():
             ############## SpectralEmbedding
             print(dataset_name + ' SpectralEmbedding result')
             print('---------------')
-            model = SpectralEmbedding(n_components=2)
+            model = SpectralEmbedding(n_components=d_star, n_neighbors=nn)
             se_data = model.fit_transform(dataset_data)
             se_data = se_data.T
             DR_method = 'SpectralEmbedding ' + dataset_name + ' cluster=' + CLUSTER
@@ -570,7 +657,7 @@ def main():
             ############## T-SNE
             print(dataset_name + ' T-SNE result')
             print('---------------')
-            model = TSNE(n_components=2)
+            model = TSNE(n_components=d_star, random_state=42, method='exact')
             tsne_data = model.fit_transform(dataset_data)
             tsne_data = tsne_data.T
             DR_method = 'T-SNE ' + dataset_name + ' cluster=' + CLUSTER
