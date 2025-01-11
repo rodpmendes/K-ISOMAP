@@ -39,10 +39,17 @@ from sklearn.metrics.cluster import rand_score
 from sklearn.metrics.cluster import v_measure_score
 from sklearn.metrics.cluster import fowlkes_mallows_score
 from sklearn.metrics.cluster import calinski_harabasz_score
+from sklearn.metrics import silhouette_score
+from sklearn.metrics import davies_bouldin_score
 from umap import UMAP                 # install with: pip install umap
 import json
 import sys
 from skimage.util import random_noise
+
+from sklearn.decomposition import KernelPCA
+from sklearn.manifold import LocallyLinearEmbedding
+from sklearn.manifold import SpectralEmbedding
+from sklearn.manifold import TSNE
 
 # To avoid unnecessary warning messages
 warnings.simplefilter(action='ignore')
@@ -142,7 +149,7 @@ def KIsomap(dados, k, d, option, alpha=0.5):
  Performs clustering in data, returns the obtained labels and evaluates the clusters
 '''
 def Clustering(dados, target, DR_method, cluster):
-    rand = ca = fm = v = -1
+    rand, ca, fm, v, dbs, ss = -1, -1, -1, -1, -1, -1
     labels = [-1,-2]
     try:
         print()
@@ -164,17 +171,21 @@ def Clustering(dados, target, DR_method, cluster):
         ca = calinski_harabasz_score(dados.T, labels)
         fm = fowlkes_mallows_score(target, labels)
         v = v_measure_score(target, labels)
+        dbs = davies_bouldin_score(dados.T, labels)
+        ss = silhouette_score(dados.T, labels)
         # Print evaluation metrics
         print('Rand index: ', rand)    
         print('Calinski Harabasz: ', ca)
         print('Fowlkes Mallows:', fm)
         print('V measure:', v)
+        print('Davies Bouldin Score:', dbs)
+        print('Silhouette Score:', ss)
         print()
 
     except Exception as e:
         print(DR_method + " -------- def Clustering error:", e)
     finally:
-        return [rand, ca, fm, v, labels.tolist()]
+        return [np.float64(rand), np.float64(ca), np.float64(fm), np.float64(v), np.float64(dbs), np.float64(ss), labels.tolist()]
 
 
 
@@ -213,8 +224,9 @@ def main():
     
     #To perform the experiments according to the article, uncomment the desired sets of datasets
     datasets = [
+        
         # First set of experiments
-        {"db": skdata.fetch_openml(name='servo', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
+        # {"db": skdata.fetch_openml(name='servo', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='car-evaluation', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='breast-tissue', version=2), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='Engine1', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
@@ -223,7 +235,7 @@ def main():
         # {"db": skdata.fetch_openml(name='steel-plates-fault', version=3), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='PhishingWebsites', version=1), "reduce_samples": True, "percentage":.1, "reduce_dim":False, "num_features": 0},              # 10% of the samples
         # {"db": skdata.fetch_openml(name='satimage', version=1), "reduce_samples": True, "percentage":.25, "reduce_dim":False, "num_features": 0},                     # 25% of the samples
-        # {"db": skdata.fetch_openml(name='led24', version=1), "reduce_samples": True, "percentage":.20}, "reduce_dim":False, "num_features": 0,                        # 20% of the samples
+        # {"db": skdata.fetch_openml(name='led24', version=1), "reduce_samples": True, "percentage":.20, "reduce_dim":False, "num_features": 0},                       # 20% of the samples
         # {"db": skdata.fetch_openml(name='hayes-roth', version=2), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='rabe_131', version=2), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
         # {"db": skdata.fetch_openml(name='prnn_synth', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":False, "num_features": 0},
@@ -251,6 +263,14 @@ def main():
         # {"db": skdata.fetch_openml(name='eating', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":True, "num_features": 100},                    # 100-D
         # {"db": skdata.fetch_openml(name='oh5.wc', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":True, "num_features": 40},                     # 40-D
         # {"db": skdata.fetch_openml(name='leukemia', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":True, "num_features": 40},                   # 40-D
+         
+         # Third set of datasets
+         # {"db": skdata.fetch_openml(name='pendigits', version=1), "reduce_samples": True, "percentage":.25, "reduce_dim":False, "num_features": 0},
+         # {"db": skdata.fetch_openml(name='COIL2000-train', version=1), "reduce_samples": True, "percentage":.25, "reduce_dim":False, "num_features": 0},
+         ## {"db": skdata.fetch_openml(name='mnist_784', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":True, "num_features": 100},
+         ## {"db": skdata.fetch_openml(name='Fashion-MNIST', version=1), "reduce_samples": False, "percentage":0, "reduce_dim":True, "num_features": 100},
+         
+         # Fourth set of datasets
         
     ]
     
@@ -275,7 +295,7 @@ def main():
     CLUSTER = 'gmm'
     
     # File result
-    file_results = 'first_dataset_results.json'
+    file_results = 'third_dataset_results_v2.json'
     results = {}
 
     for dataset in datasets:
@@ -299,11 +319,6 @@ def main():
                 if x == label_list[i]:  
                     labels.append(i)
         dataset_target = np.array(labels)
-
-        # Number of samples, features and classes
-        n = dataset_data.shape[0]
-        m = dataset_data.shape[1]
-        c = len(np.unique(dataset_target))
 
         # Some adjustments are require in opnML datasets
         # Categorical features must be encoded manually
@@ -344,6 +359,7 @@ def main():
         # Number of samples, features and classes
         n = dataset_data.shape[0]
         m = dataset_data.shape[1]
+        c = len(np.unique(dataset_target))
 
         # Print data info
         print('N = ', n)
@@ -363,21 +379,37 @@ def main():
 
 
         # K-ISOMAP results
-        ri_kiso, ch_kiso, fm_kiso, v_kiso = [], [], [], []
-        ch_kiso_norm, ri_kiso_norm, fm_kiso_norm, v_kiso_norm = [], [], [], []
-        ri_best_metric, ch_best_metric, fm_best_metric, v_best_metric = [], [], [], []
+        ri_kiso, ch_kiso, fm_kiso, v_kiso, dbs_kiso, ss_kiso = [], [], [], [], [], []
+        ch_kiso_norm, ri_kiso_norm, fm_kiso_norm, v_kiso_norm, dbs_kiso_norm, ss_kiso_norm = [], [], [], [], [], []
+        ri_best_metric, ch_best_metric, fm_best_metric, v_best_metric, dbs_best_metric, ss_best_metric = [], [], [], [], [], []
         
         # ISOMAP results
-        ri_iso, ch_iso, fm_iso, v_iso = [], [], [], []
-        ri_iso_norm, ch_iso_norm, fm_iso_norm, v_iso_norm = [], [], [], []
+        ri_iso, ch_iso, fm_iso, v_iso, dbs_iso, ss_iso = [], [], [], [], [], []
+        ri_iso_norm, ch_iso_norm, fm_iso_norm, v_iso_norm, dbs_iso_norm, ss_iso_norm = [], [], [], [], [], []
         
         # UMAP results
-        ri_umap, ch_umap, fm_umap, v_umap = [], [], [], []
-        ri_umap_norm, ch_umap_norm, fm_umap_norm, v_umap_norm = [], [], [], []
+        ri_umap, ch_umap, fm_umap, v_umap, dbs_umap, ss_umap = [], [], [], [], [], []
+        ri_umap_norm, ch_umap_norm, fm_umap_norm, v_umap_norm, dbs_umap_norm, ss_umap_norm = [], [], [], [], [], []
         
         # RAW results
-        ri_raw, ch_raw, fm_raw, v_raw = [], [], [], []
-        ri_raw_norm, ch_raw_norm, fm_raw_norm, v_raw_norm = [], [], [], []
+        ri_raw, ch_raw, fm_raw, v_raw, dbs_raw, ss_raw = [], [], [], [], [], []
+        ri_raw_norm, ch_raw_norm, fm_raw_norm, v_raw_norm, dbs_raw_norm, ss_raw_norm = [], [], [], [], [], []
+        
+        # KernelPCA results
+        ri_kpca, ch_kpca, fm_kpca, v_kpca, dbs_kpca, ss_kpca = [], [], [], [], [], []
+        ri_kpca_norm, ch_kpca_norm, fm_kpca_norm, v_kpca_norm, dbs_kpca_norm, ss_kpca_norm = [], [], [], [], [], []
+                
+        # LocallyLinearEmbedding results
+        ri_lle, ch_lle, fm_lle, v_lle, dbs_lle, ss_lle = [], [], [], [], [], []
+        ri_lle_norm, ch_lle_norm, fm_lle_norm, v_lle_norm, dbs_lle_norm, ss_lle_norm = [], [], [], [], [], []
+        
+        # SpectralEmbedding results
+        ri_se, ch_se, fm_se, v_se, dbs_se, ss_se = [], [], [], [], [], []
+        ri_se_norm, ch_se_norm, fm_se_norm, v_se_norm, dbs_se_norm, ss_se_norm = [], [], [], [], [], []
+        
+        # TSNE results
+        ri_tsne, ch_tsne, fm_tsne, v_tsne, dbs_tsne, ss_tsne = [], [], [], [], [], []
+        ri_tsne_norm, ch_tsne_norm, fm_tsne_norm, v_tsne_norm, dbs_tsne_norm, ss_tsne_norm = [], [], [], [], [], []
             
         for r in range(len(magnitude)):
             # Computes the results for all 10 curvature based metrics
@@ -387,7 +419,7 @@ def main():
                 dataset_data = apply_noise_type(noise_type, dataset_data, magnitude[r])
                 raw_data = apply_noise_type(noise_type, dataset_data, magnitude[r])
             
-            ri, ch, fm, v = [], [], [], []
+            ri, ch, fm, v, dbs, ss = [], [], [], [], [], []
             for i in range(11):
                 DR_method = 'K-ISOMAP ' + dataset_name + ' option=' + str(i) + ' cluster=' + CLUSTER + ' mag=' + str(r)
                 
@@ -403,6 +435,8 @@ def main():
                     ch.append(L_kiso[1])
                     fm.append(L_kiso[2])
                     v.append(L_kiso[3])
+                    dbs.append(L_kiso[4])
+                    ss.append(L_kiso[5])
             finish = time.time()
             print(dataset_name + ' K-ISOMAP time: %f s' %(finish - start))
             print()
@@ -427,6 +461,16 @@ def main():
             v_kiso.append(v_star)
             v_best_metric.append(v.index(v_star))
             
+            # Find best result in terms of Davies Bouldin Score
+            dbs_star = max(dbs)
+            dbs_kiso.append(dbs_star)
+            dbs_best_metric.append(dbs.index(dbs_star))
+            
+            # Find best result in terms of Silhouette Score
+            ss_star = max(ss)
+            ss_kiso.append(ss_star)
+            ss_best_metric.append(ss.index(ss_star))
+            
             ############## Regular ISOMAP 
             print(dataset_name + ' ISOMAP result')
             print('---------------')
@@ -439,6 +483,8 @@ def main():
             ch_iso.append(L_iso[1])
             fm_iso.append(L_iso[2])
             v_iso.append(L_iso[3])
+            dbs_iso.append(L_iso[4])
+            ss_iso.append(L_iso[5])
 
 
             ############## UMAP
@@ -453,6 +499,8 @@ def main():
             ch_umap.append(L_umap[1])
             fm_umap.append(L_umap[2])
             v_umap.append(L_umap[3])
+            dbs_umap.append(L_umap[4])
+            ss_umap.append(L_umap[5])
 
 
             ############## RAW DATA
@@ -467,57 +515,174 @@ def main():
             ch_raw.append(L_[1])
             fm_raw.append(L_[2])
             v_raw.append(L_[3])
+            dbs_raw.append(L_[4])
+            ss_raw.append(L_[5])
+            
+            
+            ############## KernelPCA
+            print(dataset_name + ' KernelPCA result')
+            print('---------------')
+            model = KernelPCA(n_components=2)
+            kpca_data = model.fit_transform(dataset_data)
+            kpca_data = kpca_data.T
+            DR_method = 'KernelPCA ' + dataset_name + ' cluster=' + CLUSTER
+            L_kpca = Clustering(kpca_data, dataset_target, DR_method, CLUSTER)
+            ri_kpca.append(L_kpca[0])
+            ch_kpca.append(L_kpca[1])
+            fm_kpca.append(L_kpca[2])
+            v_kpca.append(L_kpca[3])
+            dbs_kpca.append(L_kpca[4])
+            ss_kpca.append(L_kpca[5])
+            
+            
+            ############## LLE LocallyLinearEmbedding
+            print(dataset_name + ' LocallyLinearEmbedding result')
+            print('---------------')
+            model = LocallyLinearEmbedding(n_components=2)
+            lle_data = model.fit_transform(dataset_data)
+            lle_data = lle_data.T
+            DR_method = 'LocallyLinearEmbedding ' + dataset_name + ' cluster=' + CLUSTER
+            L_lle = Clustering(lle_data, dataset_target, DR_method, CLUSTER)
+            ri_lle.append(L_lle[0])
+            ch_lle.append(L_lle[1])
+            fm_lle.append(L_lle[2])
+            v_lle.append(L_lle[3])
+            dbs_lle.append(L_lle[4])
+            ss_lle.append(L_lle[5])
+            
+            
+            ############## SpectralEmbedding
+            print(dataset_name + ' SpectralEmbedding result')
+            print('---------------')
+            model = SpectralEmbedding(n_components=2)
+            se_data = model.fit_transform(dataset_data)
+            se_data = se_data.T
+            DR_method = 'SpectralEmbedding ' + dataset_name + ' cluster=' + CLUSTER
+            L_se = Clustering(se_data, dataset_target, DR_method, CLUSTER)
+            ri_se.append(L_se[0])
+            ch_se.append(L_se[1])
+            fm_se.append(L_se[2])
+            v_se.append(L_se[3])
+            dbs_se.append(L_se[4])
+            ss_se.append(L_se[5])
+            
+            
+            ############## T-SNE
+            print(dataset_name + ' T-SNE result')
+            print('---------------')
+            model = TSNE(n_components=2)
+            tsne_data = model.fit_transform(dataset_data)
+            tsne_data = tsne_data.T
+            DR_method = 'T-SNE ' + dataset_name + ' cluster=' + CLUSTER
+            L_tsne = Clustering(tsne_data, dataset_target, DR_method, CLUSTER)
+            ri_tsne.append(L_tsne[0])
+            ch_tsne.append(L_tsne[1])
+            fm_tsne.append(L_tsne[2])
+            v_tsne.append(L_tsne[3])
+            dbs_tsne.append(L_tsne[4])
+            ss_tsne.append(L_tsne[5])
 
             
-        results[dataset_name] = { "KISOMAP": [ri_kiso, ch_kiso, fm_kiso, v_kiso],
-                                  "ISOMAP": [ri_iso, ch_iso, fm_iso, v_iso],
-                                  "UMAP": [ri_umap, ch_umap, fm_umap, v_umap],
-                                  "RAW": [ri_raw, ch_raw, fm_raw, v_raw]}
+        results[dataset_name] = { "KISOMAP": [ri_kiso, ch_kiso, fm_kiso, v_kiso, dbs_kiso, ss_kiso],
+                                  "ISOMAP": [ri_iso, ch_iso, fm_iso, v_iso, dbs_iso, ss_iso],
+                                  "UMAP": [ri_umap, ch_umap, fm_umap, v_umap, dbs_umap, ss_umap],
+                                  "RAW": [ri_raw, ch_raw, fm_raw, v_raw, dbs_raw, ss_raw],
+                                  "KPCA": [ri_kpca, ch_kpca, fm_kpca, v_kpca, dbs_kpca, ss_kpca],
+                                  "LLE": [ri_lle, ch_lle, fm_lle, v_lle, dbs_lle, ss_lle],
+                                  "SE": [ri_se, ch_se, fm_se, v_se, dbs_se, ss_se],
+                                  "TSNE": [ri_tsne, ch_tsne, fm_tsne, v_tsne, dbs_tsne, ss_tsne] 
+                                  }
         
         
         
         # normalize data results
-        ri_data = ri_kiso + ri_iso + ri_umap + ri_raw
+        ri_data = ri_kiso + ri_iso + ri_umap + ri_raw + ri_kpca + ri_lle + ri_se + ri_tsne
         min1, max1 = np.min(ri_data), np.max(ri_data)
         ri_data_normalized = (ri_data - min1) / (max1 - min1)
         ri_kiso_norm = ri_data_normalized[:len(ri_kiso)].tolist()
         ri_iso_norm = ri_data_normalized[len(ri_kiso):len(ri_kiso)+len(ri_iso)].tolist()
         ri_umap_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso):len(ri_kiso)+len(ri_iso)+len(ri_umap)].tolist()
-        ri_raw_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap):].tolist()
+        ri_raw_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap):len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)].tolist()
+        ri_kpca_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw):len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)].tolist()
+        ri_lle_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca):len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)+len(ri_lle)].tolist()
+        ri_se_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)+len(ri_lle):len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)+len(ri_lle)+len(ri_se)].tolist()
+        ri_tsne_norm = ri_data_normalized[len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)+len(ri_lle)+len(ri_se):len(ri_kiso)+len(ri_iso)+len(ri_umap)+len(ri_raw)+len(ri_kpca)+len(ri_lle)+len(ri_se)+len(ri_tsne)].tolist()
         
         
-        ch_data = ch_kiso + ch_iso + ch_umap + ri_raw
+        ch_data = ch_kiso + ch_iso + ch_umap + ch_raw + ch_kpca + ch_lle + ch_se + ch_tsne
         min1, max1 = np.min(ch_data), np.max(ch_data)
         ch_data_normalized = (ch_data - min1) / (max1 - min1)
         ch_kiso_norm = ch_data_normalized[:len(ch_kiso)].tolist()
         ch_iso_norm = ch_data_normalized[len(ch_kiso):len(ch_kiso)+len(ch_iso)].tolist()
         ch_umap_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso):len(ch_kiso)+len(ch_iso)+len(ch_umap)].tolist()
-        ch_raw_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap):].tolist()
+        ch_raw_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap):len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)].tolist()
+        ch_kpca_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw):len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)].tolist()
+        ch_lle_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca):len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)+len(ch_lle)].tolist()
+        ch_se_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)+len(ch_lle):len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)+len(ch_lle)+len(ch_se)].tolist()
+        ch_tsne_norm = ch_data_normalized[len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)+len(ch_lle)+len(ch_se):len(ch_kiso)+len(ch_iso)+len(ch_umap)+len(ch_raw)+len(ch_kpca)+len(ch_lle)+len(ch_se)+len(ch_tsne)].tolist()
         
         
-        fm_data = fm_kiso + fm_iso + fm_umap + fm_raw
+        fm_data = fm_kiso + fm_iso + fm_umap + fm_raw + fm_kpca + fm_lle + fm_se + fm_tsne
         min1, max1 = np.min(fm_data), np.max(fm_data)
         fm_data_normalized = (fm_data - min1) / (max1 - min1)
         fm_kiso_norm = fm_data_normalized[:len(fm_kiso)].tolist()
         fm_iso_norm = fm_data_normalized[len(fm_kiso):len(fm_kiso)+len(fm_iso)].tolist()
         fm_umap_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso):len(fm_kiso)+len(fm_iso)+len(fm_umap)].tolist()
-        fm_raw_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap):].tolist()
-        
+        fm_raw_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap):len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)].tolist()
+        fm_kpca_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw):len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)].tolist()
+        fm_lle_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca):len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)+len(fm_lle)].tolist()
+        fm_se_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)+len(fm_lle):len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)+len(fm_lle)+len(fm_se)].tolist()
+        fm_tsne_norm = fm_data_normalized[len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)+len(fm_lle)+len(fm_se):len(fm_kiso)+len(fm_iso)+len(fm_umap)+len(fm_raw)+len(fm_kpca)+len(fm_lle)+len(fm_se)+len(fm_tsne)].tolist()
+
             
-        v_data = v_kiso + v_iso + v_umap + v_raw
+        v_data = v_kiso + v_iso + v_umap + v_raw + v_kpca + v_lle + v_se + v_tsne
         min1, max1 = np.min(v_data), np.max(v_data)
         v_data_normalized = (v_data - min1) / (max1 - min1)
         v_kiso_norm = v_data_normalized[:len(v_kiso)].tolist()
         v_iso_norm = v_data_normalized[len(v_kiso):len(v_kiso)+len(v_iso)].tolist()
         v_umap_norm = v_data_normalized[len(v_kiso)+len(v_iso):len(v_kiso)+len(v_iso)+len(v_umap)].tolist()
-        v_raw_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap):].tolist()
+        v_raw_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap):len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)].tolist()
+        v_kpca_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw):len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)].tolist()
+        v_lle_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca):len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)+len(v_lle)].tolist()
+        v_se_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)+len(v_lle):len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)+len(v_lle)+len(v_se)].tolist()
+        v_tsne_norm = v_data_normalized[len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)+len(v_lle)+len(v_se):len(v_kiso)+len(v_iso)+len(v_umap)+len(v_raw)+len(v_kpca)+len(v_lle)+len(v_se)+len(v_tsne)].tolist()
+                
+        
+        dbs_data = dbs_kiso + dbs_iso + dbs_umap + dbs_raw + dbs_kpca + dbs_lle + dbs_se + dbs_tsne
+        min1, max1 = np.min(dbs_data), np.max(dbs_data)
+        dbs_data_normalized = (dbs_data - min1) / (max1 - min1)
+        dbs_kiso_norm = dbs_data_normalized[:len(dbs_kiso)].tolist()
+        dbs_iso_norm = dbs_data_normalized[len(dbs_kiso):len(dbs_kiso)+len(dbs_iso)].tolist()
+        dbs_umap_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)].tolist()
+        dbs_raw_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso)+len(dbs_umap):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)].tolist()
+        dbs_kpca_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)].tolist()
+        dbs_lle_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)+len(dbs_lle)].tolist()
+        dbs_se_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)+len(dbs_lle):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)+len(dbs_lle)+len(dbs_se)].tolist()
+        dbs_tsne_norm = dbs_data_normalized[len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)+len(dbs_lle)+len(dbs_se):len(dbs_kiso)+len(dbs_iso)+len(dbs_umap)+len(dbs_raw)+len(dbs_kpca)+len(dbs_lle)+len(dbs_se)+len(dbs_tsne)].tolist()
+        
+        
+        ss_data = ss_kiso + ss_iso + ss_umap + ss_raw + ss_kpca + ss_lle + ss_se + ss_tsne
+        min1, max1 = np.min(ss_data), np.max(ss_data)
+        ss_data_normalized = (ss_data - min1) / (max1 - min1)
+        ss_kiso_norm = ss_data_normalized[:len(ss_kiso)].tolist()
+        ss_iso_norm = ss_data_normalized[len(ss_kiso):len(ss_kiso)+len(ss_iso)].tolist()
+        ss_umap_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso):len(ss_kiso)+len(ss_iso)+len(ss_umap)].tolist()
+        ss_raw_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso)+len(ss_umap):len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)].tolist()
+        ss_kpca_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw):len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)].tolist()
+        ss_lle_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca):len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)+len(ss_lle)].tolist()
+        ss_se_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)+len(ss_lle):len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)+len(ss_lle)+len(ss_se)].tolist()
+        ss_tsne_norm = ss_data_normalized[len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)+len(ss_lle)+len(ss_se):len(ss_kiso)+len(ss_iso)+len(ss_umap)+len(ss_raw)+len(ss_kpca)+len(ss_lle)+len(ss_se)+len(ss_tsne)].tolist()
 
         
-        results[dataset_name + '_norm'] = { "KISOMAP": [ri_kiso_norm, ch_kiso_norm, fm_kiso_norm, v_kiso_norm],
-                                            "ISOMAP": [ri_iso_norm, ch_iso_norm, fm_iso_norm, v_iso_norm],
-                                            "UMAP": [ri_umap_norm, ch_umap_norm, fm_umap_norm, v_umap_norm],
-                                            "RAW": [ri_raw_norm, ch_raw_norm, fm_raw_norm, v_raw_norm]}
-        
+        results[dataset_name + '_norm'] = { "KISOMAP": [ri_kiso_norm, ch_kiso_norm, fm_kiso_norm, v_kiso_norm, dbs_kiso_norm, ss_kiso_norm],
+                                            "ISOMAP": [ri_iso_norm, ch_iso_norm, fm_iso_norm, v_iso_norm, dbs_iso_norm, ss_iso_norm],
+                                            "UMAP": [ri_umap_norm, ch_umap_norm, fm_umap_norm, v_umap_norm, dbs_umap_norm, ss_umap_norm],
+                                            "RAW": [ri_raw_norm, ch_raw_norm, fm_raw_norm, v_raw_norm, dbs_raw_norm, ss_raw_norm],
+                                            "KPCA": [ri_kpca_norm, ch_kpca_norm, fm_kpca_norm, v_kpca_norm, dbs_kpca_norm, ss_kpca_norm],
+                                            "LLE": [ri_lle_norm, ch_lle_norm, fm_lle_norm, v_lle_norm, dbs_lle_norm, ss_lle_norm],
+                                            "SE": [ri_se_norm, ch_se_norm, fm_se_norm, v_se_norm, dbs_se_norm, ss_se_norm],
+                                            "TSNE": [ri_tsne_norm, ch_tsne_norm, fm_tsne_norm, v_tsne_norm, dbs_tsne_norm, ss_tsne_norm]}
+
         print('Dataset ', dataset_name,' complete')
         print()
         
