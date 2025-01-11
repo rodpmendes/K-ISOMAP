@@ -30,6 +30,7 @@ from numpy import sqrt
 from numpy.linalg import norm
 from sklearn.decomposition import PCA
 from sklearn.manifold import Isomap
+import skdim
 from sklearn import preprocessing
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
@@ -438,8 +439,22 @@ def main():
         print('M = ', m)
         print('C = %d' %c)
         
+            ######## INTRINSIC DIMENSION ESTIMATION
+        # Estimate global intrinsic dimension with MLE - Levina & Bickel
+        MLE = skdim.id.MLE().fit(dataset_data)
+
+        # Get estimated intrinsic dimension
+        if int(np.floor(MLE.dimension_)) == 0 or int(np.floor(MLE.dimension_)) == 1:
+            d_star = 2
+        else: 
+            d_star = int(np.floor(MLE.dimension_)) 
+
+        print("Intrinsic Dimension: ", d_star)
+
         # Number of neighbors in KNN graph (patch size)
-        nn = round(sqrt(n))                 
+        nn = int(np.floor(np.sqrt(n)))
+
+        print("Number of neighbors: ", nn)
 
         
         ############## K-ISOMAP 
@@ -496,7 +511,7 @@ def main():
                 DR_method = 'K-ISOMAP ' + dataset_name + ' option=' + str(i) + ' cluster=' + CLUSTER + ' mag=' + str(r)
                 
                 try:
-                    dados_kiso = KIsomap(dataset_data, nn, 2, i)       
+                    dados_kiso = KIsomap(dataset_data, nn, d_star, i)       
                 except Exception as e:
                     print(DR_method + " -------- def KIsomap error:", e)
                     dados_kiso = []
@@ -546,7 +561,7 @@ def main():
             ############## Regular ISOMAP 
             print(dataset_name + ' ISOMAP result')
             print('---------------')
-            model = Isomap(n_neighbors=nn, n_components=2)
+            model = Isomap(n_neighbors=nn, n_components=d_star)
             isomap_data = model.fit_transform(dataset_data)
             isomap_data = isomap_data.T
             DR_method = 'ISOMAP ' + dataset_name + ' cluster=' + CLUSTER
@@ -562,7 +577,7 @@ def main():
             ############## UMAP
             print(dataset_name + ' UMAP result')
             print('---------------')
-            model = UMAP(n_components=2)
+            model = UMAP(n_components=d_star, n_neighbors=nn)
             umap_data = model.fit_transform(dataset_data)
             umap_data = umap_data.T
             DR_method = 'UMAP ' + dataset_name + ' cluster=' + CLUSTER
@@ -594,7 +609,7 @@ def main():
             ############## KernelPCA
             print(dataset_name + ' KernelPCA result')
             print('---------------')
-            model = KernelPCA(n_components=2)
+            model = KernelPCA(n_components=d_star,kernel='rbf')
             kpca_data = model.fit_transform(dataset_data)
             kpca_data = kpca_data.T
             DR_method = 'KernelPCA ' + dataset_name + ' cluster=' + CLUSTER
@@ -610,7 +625,7 @@ def main():
             ############## LLE LocallyLinearEmbedding
             print(dataset_name + ' LocallyLinearEmbedding result')
             print('---------------')
-            model = LocallyLinearEmbedding(n_components=2)
+            model = LocallyLinearEmbedding(n_components=d_star,n_neighbors=nn)
             lle_data = model.fit_transform(dataset_data)
             lle_data = lle_data.T
             DR_method = 'LocallyLinearEmbedding ' + dataset_name + ' cluster=' + CLUSTER
@@ -626,7 +641,7 @@ def main():
             ############## SpectralEmbedding
             print(dataset_name + ' SpectralEmbedding result')
             print('---------------')
-            model = SpectralEmbedding(n_components=2)
+            model = SpectralEmbedding(n_components=d_star, n_neighbors=nn)
             se_data = model.fit_transform(dataset_data)
             se_data = se_data.T
             DR_method = 'SpectralEmbedding ' + dataset_name + ' cluster=' + CLUSTER
@@ -642,7 +657,7 @@ def main():
             ############## T-SNE
             print(dataset_name + ' T-SNE result')
             print('---------------')
-            model = TSNE(n_components=2)
+            model = TSNE(n_components=d_star, random_state=42, method='exact')
             tsne_data = model.fit_transform(dataset_data)
             tsne_data = tsne_data.T
             DR_method = 'T-SNE ' + dataset_name + ' cluster=' + CLUSTER
